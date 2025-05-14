@@ -1,6 +1,6 @@
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, SystemMessage, HumanMessage
 from typing import Dict, Any
-from openai import AsyncOpenAI
+from langchain_openai import ChatOpenAI
 import os
 import logging
 
@@ -17,8 +17,13 @@ class Editor:
         if not self.openai_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
         
-        # Configure OpenAI
-        self.openai_client = AsyncOpenAI(api_key=self.openai_key)
+        # Configure a single OpenAI client for all tasks
+        self.llm_client = ChatOpenAI(
+            model="qwen2.5_72b_instruct-gptq-int4",
+            openai_api_key=self.openai_key,
+            openai_api_base="http://172.17.3.88:8021/v1",
+            temperature=0
+        )
         
         # Initialize context dictionary for use across methods
         self.context = {
@@ -212,63 +217,53 @@ class Editor:
             reference_text = format_references_section(references, reference_info, reference_titles)
             logger.info(f"Added {len(references)} references during compilation")
         
-        # Use values from centralized context
+        # 使用集中上下文的值
         company = self.context["company"]
         industry = self.context["industry"]
         hq_location = self.context["hq_location"]
-        
-        prompt = f"""You are compiling a comprehensive research report about {company}.
 
-Compiled briefings:
+        prompt = f"""你是一位专业的报告编辑，现在需要将关于{company}的研究简报整合成一份全面的公司研究报告。
+
+已整理的简报内容如下：
 {combined_content}
 
-Create a comprehensive and focused report on {company}, a {industry} company headquartered in {hq_location} that:
-1. Integrates information from all sections into a cohesive non-repetitive narrative
-2. Maintains important details from each section
-3. Logically organizes information and removes transitional commentary / explanations
-4. Uses clear section headers and structure
+请根据以下要求，撰写一份关于{company}（这是一家总部位于{hq_location}的{industry}公司）的综合性、重点突出的研究报告：
 
-Formatting rules:
-Strictly enforce this EXACT document structure:
+1. 将所有部分的信息整合为连贯且无重复的叙述
+2. 保留每个部分的重要细节
+3. 合理组织内容，去除过渡性评论或解释
+4. 使用清晰的分节标题和结构
 
-# {company} Research Report
+格式要求：
+严格按照以下文档结构输出（不要更改标题顺序和格式）：
 
-## Company Overview
-[Company content with ### subsections]
+# {company} 研究报告
 
-## Industry Overview
-[Industry content with ### subsections]
+## 公司概览
+[公司内容，包含###子标题]
 
-## Financial Overview
-[Financial content with ### subsections]
+## 行业概览
+[行业内容，包含###子标题]
 
-## News
-[News content with ### subsections]
+## 财务概览
+[财务内容，包含###子标题]
 
-Return the report in clean markdown format. No explanations or commentary."""
-        
+## 新闻
+[新闻内容，包含###子标题]
+
+请以干净的Markdown格式返回报告，不要添加任何解释或评论。"""
+
         try:
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-4.1",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert report editor that compiles research briefings into comprehensive company reports."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0,
-                stream=False
-            )
-            initial_report = response.choices[0].message.content.strip()
-            
-            # Append the references section after LLM processing
+            response = await self.llm_client.ainvoke([
+                SystemMessage(content="你是一位专业的报告编辑，负责将研究简报整合成全面的公司研究报告。"),
+                HumanMessage(content=prompt)
+            ])
+            initial_report = response.content.strip()
+
+            # LLM处理后追加参考文献部分
             if reference_text:
                 initial_report = f"{initial_report}\n\n{reference_text}"
-            
+
             return initial_report
         except Exception as e:
             logger.error(f"Error in initial compilation: {e}")
@@ -281,99 +276,75 @@ Return the report in clean markdown format. No explanations or commentary."""
         industry = self.context["industry"]
         hq_location = self.context["hq_location"]
         
-        prompt = f"""You are an expert briefing editor. You are given a report on {company}.
+        prompt = f"""你是一位专业的报告编辑。你收到了一份关于{company}的研究报告。
 
-Current report:
+当前报告内容如下：
 {content}
 
-1. Remove redundant or repetitive information
-2. Remove information that is not relevant to {company}, the {industry} company headquartered in {hq_location}.
-3. Remove sections lacking substantial content
-4. Remove any meta-commentary (e.g. "Here is the news...")
+请严格按照以下要求进行处理：
 
-Strictly enforce this EXACT document structure:
+1. 删除冗余或重复的信息
+2. 删除与{company}（一家总部位于{hq_location}的{industry}公司）无关的信息
+3. 删除内容空洞、无实质信息的部分
+4. 删除所有元评论或过渡性说明（如“以下是新闻...”等）
 
-## Company Overview
-[Company content with ### subsections]
+严格遵循以下文档结构（不要更改标题顺序和格式）：
 
-## Industry Overview
-[Industry content with ### subsections]
+## 公司概览
+[公司内容，包含###子标题]
 
-## Financial Overview
-[Financial content with ### subsections]
+## 行业概览
+[行业内容，包含###子标题]
 
-## News
-[News content with ### subsections]
+## 财务概览
+[财务内容，包含###子标题]
 
-## References
-[References in MLA format - PRESERVE EXACTLY AS PROVIDED]
+## 新闻
+[新闻内容，仅用*号要点，不要有标题]
 
-Critical rules:
-1. The document MUST start with "# {company} Research Report"
-2. The document MUST ONLY use these exact ## headers in this order:
-   - ## Company Overview
-   - ## Industry Overview
-   - ## Financial Overview
-   - ## News
-   - ## References
-3. NO OTHER ## HEADERS ARE ALLOWED
-4. Use ### for subsections in Company/Industry/Financial sections
-5. News section should only use bullet points (*), never headers
-6. Never use code blocks (```)
-7. Never use more than one blank line between sections
-8. Format all bullet points with *
-9. Add one blank line before and after each section/list
-10. DO NOT CHANGE the format of the references section
+## 参考文献
+[MLA格式参考文献——务必原样保留，不要更改]
 
-Return the polished report in flawless markdown format. No explanation.
+关键规则：
+1. 文档必须以“# {company} 研究报告”开头
+2. 只允许使用以下##标题，且顺序如下：
+   - ## 公司概览
+   - ## 行业概览
+   - ## 财务概览
+   - ## 新闻
+   - ## 参考文献
+3. 不允许出现其他##标题
+4. 公司/行业/财务部分的子标题请用###，新闻部分只用*号要点，不要用标题
+5. 严禁出现代码块（```）
+6. 各部分之间最多只允许有一个空行
+7. 所有要点请用*号格式
+8. 每个部分/列表前后请加一个空行
+9. 参考文献部分格式必须保持不变，不能修改
 
-Return the cleaned report in flawless markdown format. No explanations or commentary."""
+请以干净、无解释的Markdown格式返回清理后的报告，不要添加任何说明或评论。
+"""
         
         try:
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-4.1-mini", 
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert markdown formatter that ensures consistent document structure."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                temperature=0,
-                stream=True
-            )
+            response_stream = self.llm_client.astream([
+                SystemMessage(content="你是一位专业的Markdown格式化编辑，确保文档结构一致且规范。"),
+                HumanMessage(content=prompt)
+            ])
             
             accumulated_text = ""
             buffer = ""
             
-            async for chunk in response:
-                if chunk.choices[0].finish_reason == "stop":
-                    websocket_manager = state.get('websocket_manager')
-                    if websocket_manager and buffer:
-                        job_id = state.get('job_id')
-                        if job_id:
-                            await websocket_manager.send_status_update(
-                                job_id=job_id,
-                                status="report_chunk",
-                                message="Formatting final report",
-                                result={
-                                    "chunk": buffer,
-                                    "step": "Editor"
-                                }
-                            )
-                    break
-                    
-                chunk_text = chunk.choices[0].delta.content
+            async for chunk in response_stream:
+                chunk_text = chunk.content
                 if chunk_text:
                     accumulated_text += chunk_text
                     buffer += chunk_text
                     
-                    if any(char in buffer for char in ['.', '!', '?', '\n']) and len(buffer) > 10:
-                        if websocket_manager := state.get('websocket_manager'):
-                            if job_id := state.get('job_id'):
+                    # Send buffer content via WebSocket if conditions are met
+                    if any(char in buffer for char in ['.', '!', '?', '\\n']) and len(buffer) > 10:
+                        websocket_manager = state.get('websocket_manager')
+                        if websocket_manager:
+                            job_id = state.get('job_id')
+                            if job_id:
                                 await websocket_manager.send_status_update(
                                     job_id=job_id,
                                     status="report_chunk",
@@ -384,6 +355,21 @@ Return the cleaned report in flawless markdown format. No explanations or commen
                                     }
                                 )
                         buffer = ""
+            # After the loop, send any remaining text in the buffer
+            if buffer:
+                websocket_manager = state.get('websocket_manager')
+                if websocket_manager:
+                    job_id = state.get('job_id')
+                    if job_id:
+                        await websocket_manager.send_status_update(
+                            job_id=job_id,
+                            status="report_chunk",
+                            message="Formatting final report",
+                            result={
+                                "chunk": buffer,
+                                "step": "Editor"
+                            }
+                        )
             
             return (accumulated_text or "").strip()
         except Exception as e:

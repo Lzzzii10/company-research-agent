@@ -13,13 +13,13 @@ class IndustryAnalyzer(BaseResearcher):
         industry = state.get('industry', 'Unknown Industry')
         msg = [f"🏭 Industry Analyzer analyzing {company} in {industry}"]
         
-        # Generate search queries using LLM
+        # 使用LLM生成行业分析相关的检索查询
         queries = await self.generate_queries(state, """
-        Generate queries on the industry analysis of {company} in the {industry} industry such as:
-        - Market position
-        - Competitors
-        - {industry} industry trends and challenges
-        - Market size and growth
+        针对{company}（所属行业：{industry}），生成行业分析相关的检索查询，包括但不限于以下方面：
+        - 市场地位
+        - 主要竞争对手
+        - {industry} 行业趋势与挑战
+        - 市场规模与增长情况
         """)
 
         subqueries_msg = "🔍 Subqueries for industry analysis:\n" + "\n".join([f"• {query}" for query in queries])

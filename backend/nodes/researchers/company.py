@@ -15,11 +15,11 @@ class CompanyAnalyzer(BaseResearcher):
         
         # Generate search queries using LLM
         queries = await self.generate_queries(state, """
-        Generate queries on the company fundamentals of {company} in the {industry} industry such as:
-        - Core products and services
-        - Company history and milestones
-        - Leadership team
-        - Business model and strategy
+        针对{company}（所属行业：{industry}），生成公司基本面相关的检索查询，包括但不限于以下方面：
+        - 核心产品与服务
+        - 公司历史与重要里程碑
+        - 管理团队
+        - 商业模式与发展战略
         """)
 
         # Add message to show subqueries with emojis

@@ -11,13 +11,12 @@ class NewsScanner(BaseResearcher):
     async def analyze(self, state: ResearchState) -> Dict[str, Any]:
         company = state.get('company', 'Unknown Company')
         msg = [f"📰 News Scanner analyzing {company}"]
-        
-        # Generate search queries using LLM
+        # 使用LLM生成与公司相关新闻的检索查询
         queries = await self.generate_queries(state, """
-        Generate queries on the recent news coverage of {company} such as:
-        - Recent company announcements
-        - Press releases
-        - New partnerships
+        针对{company}，生成与近期新闻报道相关的检索查询，包括但不限于以下方面：
+        - 公司最新公告
+        - 新闻稿
+        - 新的合作伙伴关系
         """)
 
         subqueries_msg = "🔍 Subqueries for news analysis:\n" + "\n".join([f"• {query}" for query in queries])

@@ -4,6 +4,8 @@ import os
 import logging
 from ..classes import ResearchState
 import asyncio
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage
 
 logger = logging.getLogger(__name__)
 
@@ -12,13 +14,17 @@ class Briefing:
     
     def __init__(self) -> None:
         self.max_doc_length = 8000  # Maximum document content length
-        self.gemini_key = os.getenv("GEMINI_API_KEY")
-        if not self.gemini_key:
-            raise ValueError("GEMINI_API_KEY environment variable is not set")
+
+        self.openai_key = os.getenv("OPENAI_API_KEY")
+        if not self.openai_key:
+            raise ValueError("OPENAI_API_KEY environment variable is not set")
         
-        # Configure Gemini
-        genai.configure(api_key=self.gemini_key)
-        self.gemini_model = genai.GenerativeModel('gemini-2.0-flash')
+        # Configure ChatOpenAI
+        self.openai_client = ChatOpenAI(
+            model="qwen2.5_72b_instruct-gptq-int4",
+            openai_api_key=self.openai_key,
+            openai_api_base="http://172.17.3.88:8021/v1"
+        )
 
     async def generate_category_briefing(
         self, docs: Union[Dict[str, Any], List[Dict[str, Any]]], 
@@ -44,103 +50,103 @@ class Briefing:
                 )
 
         prompts = {
-            'company': f"""Create a focused company briefing for {company}, a {industry} company based in {hq_location}.
-Key requirements:
-1. Start with: "{company} is a [what] that [does what] for [whom]"
-2. Structure using these exact headers and bullet points:
+            'company': f"""请为{company}（一家位于{hq_location}的{industry}公司）撰写一份简明的公司简报。
+要求如下：
+1. 以"{company}是一家[什么类型公司]，为[客户对象]提供[产品/服务]"开头。
+2. 按以下标题和要点结构输出：
 
-### Core Product/Service
-* List distinct products/features
-* Include only verified technical capabilities
+### 核心产品/服务
+* 列出不同的产品或功能
+* 仅包含已证实的技术能力
 
-### Leadership Team
-* List key leadership team members
-* Include their roles and expertise
+### 管理团队
+* 列出主要管理团队成员
+* 包含其职位和专长
 
-### Target Market
-* List specific target audiences
-* List verified use cases
-* List confirmed customers/partners
+### 目标市场
+* 列出具体目标客户群体
+* 列出已证实的应用场景
+* 列出已确认的客户或合作伙伴
 
-### Key Differentiators
-* List unique features
-* List proven advantages
+### 关键差异化
+* 列出独特功能
+* 列出已证实的优势
 
-### Business Model
-* Discuss product / service pricing
-* List distribution channels
+### 商业模式
+* 说明产品/服务定价
+* 列出分销渠道
 
-3. Each bullet must be a single, complete fact
-4. Never mention "no information found" or "no data available"
-5. No paragraphs, only bullet points
-6. Provide only the briefing. No explanations or commentary.""",
+3. 每个要点必须是独立、完整的事实
+4. 不要出现"未找到信息"或"暂无数据"等字样
+5. 只用要点，不要写段落
+6. 只输出简报内容，不要有任何解释或评论。""",
 
-            'industry': f"""Create a focused industry briefing for {company}, a {industry} company based in {hq_location}.
-Key requirements:
-1. Structure using these exact headers and bullet points:
+            'industry': f"""请为{company}（一家位于{hq_location}的{industry}公司）撰写一份简明的行业简报。
+要求如下：
+1. 按以下标题和要点结构输出：
 
-### Market Overview
-* State {company}'s exact market segment
-* List market size with year
-* List growth rate with year range
+### 市场概览
+* 说明{company}所处的具体市场细分
+* 列出市场规模及年份
+* 列出增长率及年份区间
 
-### Direct Competition
-* List named direct competitors
-* List specific competing products
-* List market positions
+### 直接竞争
+* 列出直接竞争对手名称
+* 列出具体竞争产品
+* 列出市场地位
 
-### Competitive Advantages
-• List unique technical features
-• List proven advantages
+### 竞争优势
+* 列出独特技术特性
+* 列出已证实的优势
 
-### Market Challenges
-• List specific verified challenges
+### 市场挑战
+* 列出具体且已证实的挑战
 
-2. Each bullet must be a single, complete news event.
-3. No paragraphs, only bullet points
-4. Never mention "no information found" or "no data available"
-5. Provide only the briefing. No explanation.""",
+2. 每个要点必须是独立、完整的事实
+3. 只用要点，不要写段落
+4. 不要出现"未找到信息"或"暂无数据"等字样
+5. 只输出简报内容，不要有任何解释。""",
 
-            'financial': f"""Create a focused financial briefing for {company}, a {industry} company based in {hq_location}.
-Key requirements:
-1. Structure using these headers and bullet points:
+            'financial': f"""请为{company}（一家位于{hq_location}的{industry}公司）撰写一份简明的财务简报。
+要求如下：
+1. 按以下标题和要点结构输出：
 
-### Funding & Investment
-* Total funding amount with date
-* List each funding round with date
-* List named investors
+### 融资与投资
+* 总融资金额及日期
+* 列出每轮融资及日期
+* 列出投资人名称
 
-### Revenue Model
-* Discuss product / service pricing if applicable
+### 收入模式
+* 如有，说明产品/服务定价
 
-2. Include specific numbers when possible
-3. No paragraphs, only bullet points
-4. Never mention "no information found" or "no data available"
-5. NEVER repeat the same round of funding multiple times. ALWAYS assume that multiple funding rounds in the same month are the same round.
-6. NEVER include a range of funding amounts. Use your best judgement to determine the exact amount based on the information provided.
-6. Provide only the briefing. No explanation or commentary.""",
+2. 尽量包含具体数字
+3. 只用要点，不要写段落
+4. 不要出现"未找到信息"或"暂无数据"等字样
+5. 切勿重复同一轮融资。若同月有多轮融资，视为同一轮。
+6. 切勿出现融资金额区间。请根据信息判断最合理的具体金额。
+7. 只输出简报内容，不要有任何解释或评论。""",
 
-            'news': f"""Create a focused news briefing for {company}, a {industry} company based in {hq_location}.
-Key requirements:
-1. Structure into these categories using bullet points:
+            'news': f"""请为{company}（一家位于{hq_location}的{industry}公司）撰写一份简明的新闻简报。
+要求如下：
+1. 按以下类别用要点列出：
 
-### Major Announcements
-* Product / service launches
-* New initiatives
+### 重大公告
+* 产品/服务发布
+* 新举措
 
-### Partnerships
-* Integrations
-* Collaborations
+### 合作伙伴关系
+* 集成
+* 合作
 
-### Recognition
-* Awards
-* Press coverage
+### 认可
+* 奖项
+* 媒体报道
 
-2. Sort newest to oldest
-3. One event per bullet point
-4. Do not mention "no information found" or "no data available"
-5. Never use ### headers, only bullet points
-6. Provide only the briefing. Do not provide explanations or commentary.""",
+2. 按时间从新到旧排序
+3. 每个要点只描述一条新闻事件
+4. 不要出现"未找到信息"或"暂无数据"等字样
+5. 不要使用###标题，只用要点
+6. 只输出简报内容，不要有任何解释或评论。""",
         }
         
         # Normalize docs to a list of (url, doc) tuples
@@ -169,9 +175,9 @@ Key requirements:
                 break
         
         separator = "\n" + "-" * 40 + "\n"
-        prompt = f"""{prompts.get(category, 'Create a focused, informative and insightful research briefing on the company: {company} in the {industry} industry based on the provided documents.')}
+        prompt = f"""{prompts.get(category, f'请根据所提供的文档，为{company}（{industry}行业）撰写一份聚焦、信息丰富且有洞见的研究简报。')}
 
-Analyze the following documents and extract key information. Provide only the briefing, no explanations or commentary:
+请分析以下文档，提取关键信息。只需输出简报内容，不要有任何解释或评论：
 
 {separator}{separator.join(doc_texts)}{separator}
 
@@ -179,8 +185,10 @@ Analyze the following documents and extract key information. Provide only the br
         
         try:
             logger.info("Sending prompt to LLM")
-            response = self.gemini_model.generate_content(prompt)
-            content = response.text.strip()
+            # Use ainvoke for async call, and construct HumanMessage
+            response = await self.openai_client.ainvoke([HumanMessage(content=prompt)])
+            # Access content from the AIMessage response
+            content = response.content.strip()
             if not content:
                 logger.error(f"Empty response from LLM for {category} briefing")
                 return {'content': ''}

@@ -22,6 +22,9 @@ class GroundingNode:
         company = state.get('company', 'Unknown Company')
         msg = f"🎯 Initiating research for {company}...\n"
         
+        # 使用海象运算符(:=)尝试从state字典中获取websocket_manager
+        # 如果获取成功(值不为None)，则将其赋值给websocket_manager变量
+        # 同时这个赋值操作的结果会作为if语句的条件
         if websocket_manager := state.get('websocket_manager'):
             if job_id := state.get('job_id'):
                 await websocket_manager.send_status_update(
@@ -33,7 +36,7 @@ class GroundingNode:
 
         site_scrape = {}
 
-        # Only attempt extraction if we have a URL
+        # 仅在有URL时尝试提取
         if url := state.get('company_url'):
             msg += f"\n🌐 Analyzing company website: {url}"
             logger.info(f"Starting website analysis for {url}")

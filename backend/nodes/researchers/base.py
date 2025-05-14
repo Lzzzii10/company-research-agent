@@ -1,6 +1,7 @@
 import os
 from datetime import datetime
-from openai import AsyncOpenAI
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import HumanMessage, SystemMessage
 from tavily import AsyncTavilyClient
 from ...classes import ResearchState
 from typing import Dict, Any, List
@@ -19,7 +20,14 @@ class BaseResearcher:
             raise ValueError("Missing API keys")
             
         self.tavily_client = AsyncTavilyClient(api_key=tavily_key)
-        self.openai_client = AsyncOpenAI(api_key=openai_key)
+        self.openai_client = ChatOpenAI(
+            model="qwen2.5_72b_instruct-gptq-int4", # model_name is deprecated, use model
+            openai_api_key=openai_key,
+            openai_api_base="http://172.17.3.88:8021/v1", # base_url is deprecated, use openai_api_base
+            streaming=True,
+            temperature=0,
+            max_tokens=4096
+        )
         self.analyst_type = "base_researcher"  # Default type
 
     @property
@@ -43,33 +51,24 @@ class BaseResearcher:
         try:
             logger.info(f"Generating queries for {company} as {self.analyst_type}")
             
-            response = await self.openai_client.chat.completions.create(
-                model="gpt-4.1-mini",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": f"You are researching {company}, a company in the {industry} industry."
-                    },
-                    {
-                        "role": "user",
-                        "content": f"""Researching {company} on {datetime.now().strftime("%B %d, %Y")}.
-{self._format_query_prompt(prompt, company, hq, current_year)}"""
-                    }
-                ],
-                temperature=0,
-                max_tokens=4096,
-                stream=True
-            )
+            messages = [
+                SystemMessage(content=f"你正在研究{company}，这是一家{industry}行业的公司。"),
+                HumanMessage(
+                    content=f"""正在研究{company}，研究日期：{datetime.now().strftime("%B %d, %Y")}。
+{self._format_query_prompt(prompt, company, industry, hq, current_year)}"""
+                )
+            ]
+
+            response_stream = self.openai_client.astream(messages)
             
             queries = []
             current_query = ""
             current_query_number = 1
 
-            async for chunk in response:
-                if chunk.choices[0].finish_reason == "stop":
-                    break
-                    
-                content = chunk.choices[0].delta.content
+            async for chunk in response_stream:
+                # AIMessageChunk provides content directly.
+                # The stream ends when the LLM finishes generating tokens.
+                content = chunk.content
                 if content:
                     current_query += content
                     
@@ -88,8 +87,8 @@ class BaseResearcher:
                         )
                     
                     # If a newline is detected, treat it as a complete query.
-                    if '\n' in current_query:
-                        parts = current_query.split('\n')
+                    if '\\n' in current_query:
+                        parts = current_query.split('\\n')
                         current_query = parts[-1]  # The last part is the start of the next query.
                         
                         for query in parts[:-1]:
@@ -150,14 +149,19 @@ class BaseResearcher:
                 )
             return []
 
-    def _format_query_prompt(self, prompt, company, hq, year):
-        return f"""{prompt}
+    def _format_query_prompt(self, prompt_template: str, company: str, industry: str, hq: str, year: int):
+        # Format the passed-in prompt template first
+        # We use a dictionary for formatting to avoid errors if a placeholder is not in the prompt_template
+        # and to make it more readable.
+        formatted_prompt = prompt_template.format(company=company, industry=industry, hq=hq, year=year)
+        
+        return f"""{formatted_prompt}
 
-        Important Guidelines:
-        - Focus ONLY on {company}-specific information
-        - Make queries very brief and to the point
-        - Provide exactly 4 search queries (one per line), with no hyphens or dashes
-        - DO NOT make assumptions about the industry - use only the provided industry information"""
+        重要提示:
+        - 只关注与{company}相关的具体信息
+        - 查询要简洁明了，直奔主题
+        - 请严格给出4条检索查询（每行一条），不要使用连字符或破折号
+        - 不要对行业做任何假设，只能使用已提供的行业信息"""
 
     def _fallback_queries(self, company, year):
         return [
